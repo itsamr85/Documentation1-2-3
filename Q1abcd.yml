@@ -1,0 +1,112 @@
+Parameters:
+   
+ 
+  OperatorEmail:
+    Description: "Email"
+    Type: String
+
+  InstanceSecurityGroup:
+    Description: "List of Security Group IDs"
+    Type: List<AWS::EC2::SecurityGroup::Id>
+  
+  AvailibilityZones:
+    Description: "List the Subnet Ids of the instance"
+    Type: List<AWS::EC2::Subnet::Id>
+
+
+
+Resources:
+  NotificationTopic:
+    Type: 'AWS::SNS::Topic'
+    Properties: 
+      Subscription: 
+      - Endpoint: !Ref OperatorEmail 
+        Protocol: email        
+
+  ASLaunchConfig:
+    Type: 'AWS::AutoScaling::LaunchConfiguration'
+    Properties:
+      ImageId: ami-0c115dbd34c69a004  
+      InstanceType: t2.micro
+      SecurityGroups:
+        Ref: "InstanceSecurityGroup"
+
+  AutoScalingGroup:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      VPCZoneIdentifier: !Ref AvailibilityZones
+      LaunchConfigurationName: !Ref ASLaunchConfig 
+      MinSize: "2"
+      MaxSize: "4"
+      DesiredCapacity: "2"
+      HealthCheckGracePeriod: "120"
+      HealthCheckType: EC2
+      NotificationConfiguration:
+        TopicARN: !Ref NotificationTopic
+        NotificationTypes:
+          - 'autoscaling:EC2_INSTANCE_LAUNCH'
+          - 'autoscaling:EC2_INSTANCE_LAUNCH_ERROR'
+          - 'autoscaling:EC2_INSTANCE_TERMINATE'
+          - 'autoscaling:EC2_INSTANCE_TERMINATE_ERROR'   
+    CreationPolicy:
+       ResourceSignal:
+          Timeout: PT15M
+          Count: '1'
+    UpdatePolicy:
+       AutoScalingRollingUpdate:
+          MinInstancesInService: '1'
+          MaxBatchSize: '1'
+          PauseTime: PT20M
+          WaitOnResourceSignals: 'true'  
+  
+  ASScaleUpPolicy:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      Cooldown: '60'
+      ScalingAdjustment: '1'
+  
+  ASScaleDownPolicy:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      Cooldown: '60'
+      ScalingAdjustment: '-1'
+  
+  CPUAlarmHigh:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: Scale-up if CPU > 80% for 10 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: '120'
+      EvaluationPeriods: '2'
+      Threshold: '80'
+      AlarmActions:
+        - !Ref ASScaleUpPolicy
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref AutoScalingGroup
+      ComparisonOperator: GreaterThanThreshold
+  CPUAlarmLow:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: Scale-down if CPU < 60% for 10 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: '120'
+      EvaluationPeriods: '2'
+      Threshold: '60'
+      AlarmActions:
+        - !Ref ASScaleDownPolicy
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref AutoScalingGroup
+      ComparisonOperator: LessThanThreshold    
+  
+          
+
